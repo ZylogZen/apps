@@ -1,0 +1,47 @@
+# --- Ambienti e Dipendenze ---
+node_modules/
+jspm_packages/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+
+# --- File di Sistema (Spazzatura) ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Log e Debug ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# --- Configurazioni Locali e Segreti (IMPORTANTE!) ---
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+
+# --- IDE e Editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.project
+.settings/
+
+# --- Build e Output ---
+dist/
+build/
+out/
+.next/
+.nuxt/
