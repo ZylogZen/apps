@@ -1,14 +1,15 @@
 """
-Window Launcher — Apri più cartelle contemporaneamente
+Window Launcher — Apri cartelle e URL contemporaneamente
 Applicazione Python con GUI tkinter dark mode.
 Le impostazioni vengono salvate in config.json.
 """
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 import json
 import os
 import sys
+import webbrowser
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 APP_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -40,14 +41,15 @@ class WindowLauncher(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("🗂  Window Launcher V.0.5 by d.a.")
+        self.title("🗂  Window Launcher V.0.6 by d.a.")
         self.configure(bg=BG_DARK)
         self.minsize(560, 520)
-        self.geometry("600x600")
+        self.geometry("620x620")
         self.resizable(True, True)
 
-        # Internal folder list: list of dicts {name, path}
-        self.folders: list[dict] = []
+        # Internal items list: list of dicts {name, path, type}
+        # type can be: "folder", "url"
+        self.items: list[dict] = []
 
         self._build_ui()
         self._load_config()
@@ -64,7 +66,7 @@ class WindowLauncher(tk.Tk):
             bg=BG_DARK, fg=FG_TEXT
         ).pack(anchor="w")
         tk.Label(
-            header, text="Configura le cartelle da aprire contemporaneamente",
+            header, text="Configura cartelle e URL da aprire contemporaneamente",
             font=FONT_SUBTITLE, bg=BG_DARK, fg=FG_SECONDARY
         ).pack(anchor="w", pady=(2, 0))
 
@@ -102,7 +104,7 @@ class WindowLauncher(tk.Tk):
         # Empty-state label (shown when list is empty)
         self.empty_label = tk.Label(
             list_frame,
-            text="Nessuna cartella configurata.\nClicca  ➕ Aggiungi Cartella  per iniziare.",
+            text="Nessun elemento configurato.\nUsa i pulsanti ➕ per aggiungere cartelle o URL.",
             font=FONT_SMALL, bg=BG_INPUT, fg=FG_SECONDARY,
             justify="center"
         )
@@ -111,19 +113,21 @@ class WindowLauncher(tk.Tk):
         btn_side = tk.Frame(card, bg=BG_CARD)
         btn_side.pack(fill="x", padx=12, pady=(0, 12))
 
-        self._make_button(btn_side, "➕  Aggiungi Cartella", self._add_folder,
-                          SUCCESS, SUCCESS_HOVER).pack(side="left", padx=(0, 8))
-        self._make_button(btn_side, "🗑  Rimuovi Selezionata", self._remove_folder,
-                          ACCENT, ACCENT_HOVER).pack(side="left")
+        self._make_button(btn_side, "📁 Cartella", self._add_folder,
+                          SUCCESS, SUCCESS_HOVER).pack(side="left", padx=(0, 6))
+        self._make_button(btn_side, "🌐 URL", self._add_url,
+                          SUCCESS, SUCCESS_HOVER).pack(side="left", padx=(0, 6))
+        self._make_button(btn_side, "🗑 Rimuovi", self._remove_item,
+                          ACCENT, ACCENT_HOVER).pack(side="right")
 
         # ── Bottom action bar ────────────────────────────────────────────────
         action_bar = tk.Frame(self, bg=BG_DARK)
         action_bar.pack(fill="x", padx=24, pady=(8, 20))
 
-        self._make_button(action_bar, "💾  Salva Impostazioni", self._save_config,
-                          SUCCESS, SUCCESS_HOVER, width=20).pack(side="left")
+        self._make_button(action_bar, "🧹  Pulisci Tutto", self._clear_all,
+                          "#ff9f43", "#feca57", width=16).pack(side="left")
         self._make_button(action_bar, "🚀  Lancia Tutto!", self._launch_all,
-                          ACCENT, ACCENT_HOVER, width=20).pack(side="right")
+                          ACCENT, ACCENT_HOVER, width=16).pack(side="right")
 
         # Status bar
         self.status_var = tk.StringVar(value="Pronto")
@@ -158,14 +162,17 @@ class WindowLauncher(tk.Tk):
 
     # ── Listbox helpers ──────────────────────────────────────────────────────
 
+    _TYPE_ICONS = {"folder": "📁", "url": "🌐"}
+
     def _refresh_listbox(self):
         self.listbox.delete(0, "end")
-        for i, f in enumerate(self.folders):
-            display = f"  {i+1}.  {f['name']}    —    {f['path']}"
+        for i, item in enumerate(self.items):
+            icon = self._TYPE_ICONS.get(item.get("type", "folder"), "📁")
+            display = f"  {icon}  {i+1}.  {item['name']}    —    {item['path']}"
             self.listbox.insert("end", display)
 
         # Show / hide empty-state label
-        if not self.folders:
+        if not self.items:
             self.empty_label.place(relx=0.5, rely=0.5, anchor="center")
         else:
             self.empty_label.place_forget()
@@ -173,67 +180,104 @@ class WindowLauncher(tk.Tk):
     # ── Actions ──────────────────────────────────────────────────────────────
 
     def _on_double_click(self, event):
-        """Apre la cartella corrispondente alla riga su cui si è fatto doppio click."""
+        """Apre l'elemento corrispondente alla riga su cui si è fatto doppio click."""
         sel = self.listbox.curselection()
         if not sel:
             return
         idx = sel[0]
-        if idx < len(self.folders):
-            path = self.folders[idx]["path"]
-            if os.path.isdir(path):
-                os.startfile(path)
-                self.status_var.set(f"Aperta: {self.folders[idx]['name']}")
-            else:
-                messagebox.showwarning(
-                    "Cartella non trovata",
-                    f"La cartella non esiste:\n{path}"
-                )
+        if idx < len(self.items):
+            self._launch_item(self.items[idx])
 
+    # ── Add helpers ──────────────────────────────────────────────────────────
 
     def _add_folder(self):
         path = filedialog.askdirectory(title="Scegli una cartella")
         if not path:
             return
         name = os.path.basename(path) or path
-        self.folders.append({"name": name, "path": path})
+        self.items.append({"name": name, "path": path, "type": "folder"})
         self._refresh_listbox()
-        self.status_var.set(f"Aggiunta: {name}")
+        self._save_config()
+        self.status_var.set(f"Aggiunta cartella: {name}")
 
-    def _remove_folder(self):
+    def _add_url(self):
+        url = simpledialog.askstring(
+            "Aggiungi URL",
+            "Inserisci l'URL da aprire:",
+            parent=self,
+        )
+        if not url:
+            return
+        # Assicura che l'URL abbia un protocollo
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        # Usa il dominio come nome
+        name = url.replace("https://", "").replace("http://", "").split("/")[0]
+        self.items.append({"name": name, "path": url, "type": "url"})
+        self._refresh_listbox()
+        self._save_config()
+        self.status_var.set(f"Aggiunto URL: {name}")
+
+    def _remove_item(self):
         sel = self.listbox.curselection()
         if not sel:
-            messagebox.showwarning("Attenzione", "Seleziona una cartella dalla lista.")
+            messagebox.showwarning("Attenzione", "Seleziona un elemento dalla lista.")
             return
         idx = sel[0]
-        removed = self.folders.pop(idx)
+        removed = self.items.pop(idx)
         self._refresh_listbox()
-        self.status_var.set(f"Rimossa: {removed['name']}")
+        self._save_config()
+        self.status_var.set(f"Rimosso: {removed['name']}")
+
+    def _clear_all(self):
+        if not self.items:
+            messagebox.showinfo("Info", "La lista è già vuota.")
+            return
+        if messagebox.askyesno("Conferma", "Vuoi rimuovere tutti gli elementi dalla lista?"):
+            self.items.clear()
+            self._refresh_listbox()
+            self._save_config()
+            self.status_var.set("Lista svuotata ✔")
+
+    # ── Launch logic ─────────────────────────────────────────────────────────
+
+    def _launch_item(self, item):
+        """Lancia un singolo elemento in base al tipo."""
+        item_type = item.get("type", "folder")
+        path = item["path"]
+        name = item["name"]
+
+        try:
+            if item_type == "url":
+                webbrowser.open(path)
+                self.status_var.set(f"Aperto URL: {name}")
+            else:  # folder
+                if os.path.isdir(path):
+                    os.startfile(path)
+                    self.status_var.set(f"Aperta: {name}")
+                else:
+                    messagebox.showwarning("Cartella non trovata", f"La cartella non esiste:\n{path}")
+        except Exception as e:
+            messagebox.showerror("Errore", f"Impossibile aprire {name}:\n{e}")
 
     def _launch_all(self):
-        if not self.folders:
-            messagebox.showinfo("Info", "Nessuna cartella da aprire.\nAggiungi almeno una cartella.")
+        if not self.items:
+            messagebox.showinfo("Info", "Nessun elemento da aprire.\nAggiungi almeno un elemento.")
             return
 
         opened = 0
-        for f in self.folders:
-            path = f["path"]
-            if os.path.isdir(path):
-                os.startfile(path)
-                opened += 1
-            else:
-                messagebox.showwarning(
-                    "Cartella non trovata",
-                    f"La cartella non esiste:\n{path}"
-                )
-        self.status_var.set(f"Aperte {opened} cartelle ✔")
+        for item in self.items:
+            self._launch_item(item)
+            opened += 1
+        self.status_var.set(f"Lanciati {opened} elementi ✔")
 
     # ── Persistence ──────────────────────────────────────────────────────────
 
     def _save_config(self):
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as fp:
-                json.dump({"folders": self.folders}, fp, indent=2, ensure_ascii=False)
-            self.status_var.set(f"Impostazioni salvate in {CONFIG_FILE} ✔")
+                json.dump({"items": self.items}, fp, indent=2, ensure_ascii=False)
+            self.status_var.set(f"Impostazioni salvate ✔")
         except Exception as e:
             messagebox.showerror("Errore", f"Impossibile salvare:\n{e}")
 
@@ -244,12 +288,18 @@ class WindowLauncher(tk.Tk):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
-            self.folders = data.get("folders", [])
+            # Retrocompatibilità: supporta sia "items" che il vecchio "folders"
+            raw = data.get("items", data.get("folders", []))
+            # Assicura che ogni elemento abbia il campo 'type'
+            for item in raw:
+                if "type" not in item:
+                    item["type"] = "folder"
+            self.items = raw
         except Exception:
-            self.folders = []
+            self.items = []
         self._refresh_listbox()
-        if self.folders:
-            self.status_var.set(f"Caricate {len(self.folders)} cartelle dalla configurazione")
+        if self.items:
+            self.status_var.set(f"Caricati {len(self.items)} elementi dalla configurazione")
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
