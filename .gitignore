@@ -30,6 +30,7 @@ yarn-error.log*
 .env.production.local
 *.pem
 *.key
+config.json
 
 # --- IDE e Editor ---
 .vscode/
