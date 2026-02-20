@@ -1,7 +1,8 @@
 """
 Window Launcher — Apri cartelle e URL contemporaneamente
 Applicazione Python con GUI tkinter dark mode.
-Le impostazioni vengono salvate in config.json.
+Le impostazioni vengono salvate in config.json (default);
+è possibile salvare e aprire configurazioni personalizzate tramite il menu File.
 """
 
 import tkinter as tk
@@ -10,6 +11,13 @@ import json
 import os
 import sys
 import webbrowser
+
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+    _DND_AVAILABLE = True
+except ImportError:
+    _DND_AVAILABLE = False
+    DND_FILES = None
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 APP_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -36,23 +44,107 @@ FONT_BUTTON   = ("Segoe UI", 11, "bold")
 FONT_SMALL    = ("Segoe UI", 9)
 
 
-class WindowLauncher(tk.Tk):
+_BaseApp = TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk
+
+
+class WindowLauncher(_BaseApp):
     """Main application window."""
 
     def __init__(self):
         super().__init__()
-        self.title("🗂  Window Launcher V.0.6 by d.a.")
         self.configure(bg=BG_DARK)
         self.minsize(560, 520)
-        self.geometry("620x620")
+        self.geometry("620x660")
         self.resizable(True, True)
+
+        # Percorso del file di configurazione attualmente aperto
+        self._current_config: str = CONFIG_FILE
 
         # Internal items list: list of dicts {name, path, type}
         # type can be: "folder", "url"
         self.items: list[dict] = []
 
+        self._build_menu()
         self._build_ui()
-        self._load_config()
+        self._setup_dnd()
+        self._load_config(self._current_config)
+        self._set_current_config(self._current_config)  # aggiorna titolo e label header
+
+    # ── Title helper ─────────────────────────────────────────────────────────
+
+    def _update_title(self):
+        name = os.path.basename(self._current_config)
+        self.title(f"🗂  Window Launcher V.0.7.1  —  {name}")
+
+    # ── Drag & Drop ──────────────────────────────────────────────────────────
+
+    def _setup_dnd(self):
+        """Registra la finestra come drop target (richiede tkinterdnd2)."""
+        if not _DND_AVAILABLE:
+            return
+        # Registra sia la finestra principale che il listbox come target
+        for widget in (self, self.listbox):
+            widget.drop_target_register(DND_FILES)
+            widget.dnd_bind("<<Drop>>", self._on_drop)
+
+    def _on_drop(self, event):
+        """Chiamato quando un file viene trascinato nella finestra."""
+        raw = event.data.strip()
+        # tkinterdnd2 su Windows racchiude path con spazi in {}, gestiamo entrambi i casi
+        if raw.startswith("{") and raw.endswith("}"):
+            path = raw[1:-1]
+        else:
+            # Prende solo il primo file se ne vengono droppati più di uno
+            path = raw.split("} {")[0].lstrip("{").rstrip("}")
+
+        path = os.path.normpath(path)
+
+        if not path.lower().endswith(".json"):
+            messagebox.showwarning(
+                "Formato non supportato",
+                f"Trascina solo file .json di configurazione.\n\nFile ricevuto:\n{path}"
+            )
+            return
+
+        self._load_config(path)
+        self._set_current_config(path)
+
+    # ── Menu bar ─────────────────────────────────────────────────────────────
+
+    def _build_menu(self):
+        menubar = tk.Menu(self, bg=BG_CARD, fg=FG_TEXT,
+                          activebackground=ACCENT, activeforeground="#ffffff",
+                          relief="flat", bd=0)
+
+        file_menu = tk.Menu(menubar, tearoff=0,
+                            bg=BG_CARD, fg=FG_TEXT,
+                            activebackground=ACCENT, activeforeground="#ffffff",
+                            relief="flat")
+
+        file_menu.add_command(label="📂  Nuova configurazione",
+                              command=self._new_config,
+                              accelerator="Ctrl+N")
+        file_menu.add_command(label="📁  Apri configurazione…",
+                              command=self._open_config,
+                              accelerator="Ctrl+O")
+        file_menu.add_separator()
+        file_menu.add_command(label="💾  Salva",
+                              command=self._save_config_current,
+                              accelerator="Ctrl+S")
+        file_menu.add_command(label="💾  Salva con nome…",
+                              command=self._save_config_as,
+                              accelerator="Ctrl+Shift+S")
+        file_menu.add_separator()
+        file_menu.add_command(label="❌  Esci", command=self.destroy)
+
+        menubar.add_cascade(label="File", menu=file_menu)
+        self.config(menu=menubar)
+
+        # Keyboard shortcuts
+        self.bind_all("<Control-n>", lambda e: self._new_config())
+        self.bind_all("<Control-o>", lambda e: self._open_config())
+        self.bind_all("<Control-s>", lambda e: self._save_config_current())
+        self.bind_all("<Control-S>", lambda e: self._save_config_as())
 
     # ── UI construction ──────────────────────────────────────────────────────
 
@@ -69,6 +161,13 @@ class WindowLauncher(tk.Tk):
             header, text="Configura cartelle e URL da aprire contemporaneamente",
             font=FONT_SUBTITLE, bg=BG_DARK, fg=FG_SECONDARY
         ).pack(anchor="w", pady=(2, 0))
+
+        # Current config label
+        self.config_label_var = tk.StringVar()
+        tk.Label(
+            header, textvariable=self.config_label_var,
+            font=FONT_SMALL, bg=BG_DARK, fg=ACCENT, anchor="w"
+        ).pack(anchor="w", pady=(4, 0))
 
         # Separator
         tk.Frame(self, bg=BORDER, height=1).pack(fill="x", padx=24, pady=12)
@@ -177,6 +276,12 @@ class WindowLauncher(tk.Tk):
         else:
             self.empty_label.place_forget()
 
+    def _set_current_config(self, path: str):
+        """Aggiorna il file di configurazione corrente e le label collegate."""
+        self._current_config = path
+        self._update_title()
+        self.config_label_var.set(f"📄  {path}")
+
     # ── Actions ──────────────────────────────────────────────────────────────
 
     def _on_double_click(self, event):
@@ -197,7 +302,7 @@ class WindowLauncher(tk.Tk):
         name = os.path.basename(path) or path
         self.items.append({"name": name, "path": path, "type": "folder"})
         self._refresh_listbox()
-        self._save_config()
+        self._save_config_current()
         self.status_var.set(f"Aggiunta cartella: {name}")
 
     def _add_url(self):
@@ -215,7 +320,7 @@ class WindowLauncher(tk.Tk):
         name = url.replace("https://", "").replace("http://", "").split("/")[0]
         self.items.append({"name": name, "path": url, "type": "url"})
         self._refresh_listbox()
-        self._save_config()
+        self._save_config_current()
         self.status_var.set(f"Aggiunto URL: {name}")
 
     def _remove_item(self):
@@ -226,7 +331,7 @@ class WindowLauncher(tk.Tk):
         idx = sel[0]
         removed = self.items.pop(idx)
         self._refresh_listbox()
-        self._save_config()
+        self._save_config_current()
         self.status_var.set(f"Rimosso: {removed['name']}")
 
     def _clear_all(self):
@@ -236,8 +341,7 @@ class WindowLauncher(tk.Tk):
         if messagebox.askyesno("Conferma", "Vuoi rimuovere tutti gli elementi dalla lista?"):
             self.items.clear()
             self._refresh_listbox()
-            self._save_config()
-            self.status_var.set("Lista svuotata ✔")
+            self.status_var.set("Lista svuotata (il file non è stato modificato) ✔")
 
     # ── Launch logic ─────────────────────────────────────────────────────────
 
@@ -273,20 +377,70 @@ class WindowLauncher(tk.Tk):
 
     # ── Persistence ──────────────────────────────────────────────────────────
 
-    def _save_config(self):
+    def _save_config_current(self):
+        """Salva nel file di configurazione attualmente attivo."""
+        self._write_config(self._current_config)
+
+    def _save_config_as(self):
+        """Chiede un nuovo percorso e salva lì la configurazione corrente."""
+        path = filedialog.asksaveasfilename(
+            title="Salva configurazione con nome",
+            defaultextension=".json",
+            filetypes=[("File di configurazione JSON", "*.json"), ("Tutti i file", "*.*")],
+            initialdir=APP_DIR,
+        )
+        if not path:
+            return
+        path = os.path.normpath(path)  # normalizza slash su Windows
+        self._write_config(path)
+        self._set_current_config(path)
+        self.status_var.set(f"Configurazione salvata come: {os.path.basename(path)}")
+
+    def _open_config(self):
+        """Apre un file di configurazione esistente."""
+        path = filedialog.askopenfilename(
+            title="Apri configurazione",
+            defaultextension=".json",
+            filetypes=[("File di configurazione JSON", "*.json"), ("Tutti i file", "*.*")],
+            initialdir=APP_DIR,
+        )
+        if not path:
+            return
+        path = os.path.normpath(path)  # normalizza slash su Windows
+        self._load_config(path)
+        self._set_current_config(path)
+
+    def _new_config(self):
+        """Riparte con una lista vuota senza toccare il file corrente."""
+        if self.items:
+            if not messagebox.askyesno(
+                "Nuova configurazione",
+                "Vuoi creare una nuova configurazione vuota?\n"
+                "Le modifiche non salvate andranno perse."
+            ):
+                return
+        self.items = []
+        self._refresh_listbox()
+        self._set_current_config(CONFIG_FILE)
+        self.status_var.set("Nuova configurazione creata")
+
+    def _write_config(self, path: str):
+        """Scrive self.items nel file indicato."""
         try:
-            with open(CONFIG_FILE, "w", encoding="utf-8") as fp:
+            with open(path, "w", encoding="utf-8") as fp:
                 json.dump({"items": self.items}, fp, indent=2, ensure_ascii=False)
-            self.status_var.set(f"Impostazioni salvate ✔")
         except Exception as e:
             messagebox.showerror("Errore", f"Impossibile salvare:\n{e}")
 
-    def _load_config(self):
-        if not os.path.exists(CONFIG_FILE):
+    def _load_config(self, path: str):
+        path = os.path.normpath(path)  # normalizza slash su Windows
+        if not os.path.exists(path):
+            self.items = []
             self._refresh_listbox()
+            self._set_status(f"File non trovato: {os.path.basename(path)}")
             return
         try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as fp:
+            with open(path, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
             # Retrocompatibilità: supporta sia "items" che il vecchio "folders"
             raw = data.get("items", data.get("folders", []))
@@ -295,11 +449,23 @@ class WindowLauncher(tk.Tk):
                 if "type" not in item:
                     item["type"] = "folder"
             self.items = raw
-        except Exception:
+        except Exception as e:
+            messagebox.showerror(
+                "Errore lettura configurazione",
+                f"Impossibile leggere il file:\n{path}\n\nDettaglio: {e}"
+            )
             self.items = []
         self._refresh_listbox()
+        self.update_idletasks()  # forza aggiornamento UI
         if self.items:
-            self.status_var.set(f"Caricati {len(self.items)} elementi dalla configurazione")
+            self._set_status(f"Caricati {len(self.items)} elementi da {os.path.basename(path)}")
+        else:
+            self._set_status(f"Configurazione aperta (vuota): {os.path.basename(path)}")
+
+    def _set_status(self, msg: str):
+        """Imposta la barra di stato in modo sicuro (può essere chiamato prima di _build_ui)."""
+        if hasattr(self, "status_var"):
+            self.status_var.set(msg)
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────

@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "name": "Documentario",
+      "path": "F:/Lavori/Accademia/Salvo&Crist_Biennio/Tesi Biennio Cinema/Salvo Di Prima - Tesi Cinema Precode Hollywood/Documentario",
+      "type": "folder"
+    },
+    {
+      "name": "materiale",
+      "path": "F:/Lavori/Accademia/Salvo&Crist_Biennio/Tesi Biennio Cinema/Salvo Di Prima - Tesi Cinema Precode Hollywood/materiale",
+      "type": "folder"
+    },
+    {
+      "name": "Pre-Code",
+      "path": "F:/Film/Pre-Code",
+      "type": "folder"
+    }
+  ]
+}
