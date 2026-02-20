@@ -30,7 +30,10 @@ yarn-error.log*
 .env.production.local
 *.pem
 *.key
-config.json
+*.json
+!package-lock.json
+!yarn.lock
+!pnpm-lock.yaml
 
 # --- IDE e Editor ---
 .vscode/
